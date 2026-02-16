@@ -14,11 +14,29 @@ Crowd_detection/
 │   ├── alert_system.py    # Logic for triggering alerts
 │   └── video_stream.py    # Video capture utility
 ├── main.py                # Main execution script
+├── app.py                 # Streamlit Dashboard
 ├── crowd_control.ipynb    # Google Colab notebook
 ├── download_weights.py    # Script to download CSRNet weights
 ├── requirements.txt       # Dependencies
 └── README.md              # This file
 ```
+
+## How to Run the Dashboard (New!)
+
+1.  **Install Streamlit**:
+    Ensure you have all dependencies installed:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+2.  **Run the App**:
+    Execute the following command in your terminal:
+    ```bash
+    python -m streamlit run app.py
+    ```
+
+3.  **Access**:
+    The dashboard will automatically open in your default web browser (usually at `http://localhost:8501`).
 
 ## How to Run on Google Colab (with GPU)
 
@@ -42,7 +60,7 @@ Crowd_detection/
     - Run the final cell to process the video.
     - Download `output.mp4` from the files sidebar.
 
-## Local Usage
+## Local Usage (Script)
 
 1.  **Download Weights**:
     Run the helper script to download CSRNet weights:

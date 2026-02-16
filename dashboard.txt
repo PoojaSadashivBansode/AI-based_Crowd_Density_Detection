@@ -1,0 +1,97 @@
+🟢 1. Live Video Feed Panel
+Shows:
+
+✔ Real-time camera feed
+✔ Bounding boxes (YOLO)
+✔ Density heatmap overlay
+
+This is the visual proof your system works.
+
+🟢 2. Crowd Count Display (TOP METRIC)
+
+Display like:
+
+👥 Current Crowd: 126
+
+
+Use large font.
+
+Why?
+
+Humans read big numbers fast.
+
+🟢 3. Density Level Indicator
+
+Convert density into status:
+
+🟢 Low
+
+🟡 Moderate
+
+🔴 High Risk
+
+This makes it usable for real-world safety.
+
+Example:
+
+Density Level: HIGH ⚠
+
+🟢 4. Real-Time Graph (Crowd Over Time)
+
+Graph showing:
+
+📈 crowd count vs time
+
+Why important?
+
+Shows trend.
+
+Example insight:
+
+👉 “Crowd surged in last 5 minutes”
+
+That’s intelligent monitoring.
+
+🟢 5. Alert System (IMPORTANT)
+
+Trigger alert when:
+
+crowd > threshold
+
+density high
+
+Show:
+
+🚨 Crowd Limit Exceeded
+🚨 Congestion Risk Deteced
+
+Optional:
+
+✔ sound alert
+✔ blinking text
+
+Simple but impressive.
+
+🟢 6. Density Heatmap View
+
+Show CSRNet output as color map.
+
+This proves your system is not just counting — it understands crowd density.
+
+⭐ EXTRA FEATURES (If you want distinction marks)
+✔ Peak Crowd Record
+
+Display:
+
+Peak Today: 214 people
+
+✔ Safe Capacity Indicator
+Capacity: 150
+Current: 126
+Status: SAFE
+
+✔ Frame Processing FPS
+
+Shows performance:
+
+Processing Speed: 18 FPS
