@@ -37,6 +37,13 @@ def process_video(video_path, threshold=50, yolo_weights='yolov8n.pt', csrnet_we
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
+    # CSV Logging Setup
+    import csv
+    import datetime
+    log_file = open('crowd_data.csv', 'w', newline='')
+    csv_writer = csv.writer(log_file)
+    csv_writer.writerow(['Timestamp', 'Frame', 'Mode', 'Count', 'Alert'])
+
     # Initial state
     use_yolo = True
     frame_count = 0
@@ -92,6 +99,12 @@ def process_video(video_path, threshold=50, yolo_weights='yolov8n.pt', csrnet_we
         if triggered:
             cv2.putText(annotated_frame, "ALERT: HIGH DENSITY", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
 
+        # Log to CSV
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        mode_str = "YOLO" if use_yolo else "CSRNet"
+        alert_str = "YES" if triggered else "NO"
+        csv_writer.writerow([timestamp, frame_count, mode_str, current_count, alert_str])
+
         out.write(annotated_frame)
         
         # Optional: Display if running locally (not in typical Colab batch mode, though cv2_imshow helps there)
@@ -101,14 +114,16 @@ def process_video(video_path, threshold=50, yolo_weights='yolov8n.pt', csrnet_we
 
     cap.release()
     out.release()
+    log_file.close()
     cv2.destroyAllWindows()
     print(f"Processing complete. Saved to {output_path}")
+    print(f"Data logged to crowd_data.csv")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', type=str, default='video.mp4', help='Path to input video')
     parser.add_argument('--threshold', type=int, default=50, help='Crowd density threshold')
-    parser.add_argument('--yolo', type=str, default='yolov8n.pt', help='YOLO weights')
+    parser.add_argument('--yolo', type=str, default='yolov8s.pt', help='YOLO weights')
     parser.add_argument('--csrnet', type=str, default='csrnet_weights.pth', help='CSRNet weights')
     
     args = parser.parse_args()
