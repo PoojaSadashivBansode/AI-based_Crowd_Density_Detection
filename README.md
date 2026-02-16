@@ -1,10 +1,8 @@
 # AI-based Crowd Density Prediction and Control System
 
 This project implements a real-time crowd counting system using a hybrid approach:
-- **YOLOv8** for low-to-medium density crowd detection (bounding box based).
-- **CSRNet** for high-density crowd estimation (density map based).
-
-The system automatically switches between models based on a configurable density threshold and triggers alerts when the count exceeds safe limits.
+- **YOLOv8** for low-to-medium density crowd detection.
+- **CSRNet** for high-density crowd estimation.
 
 ## Project Structure
 ```
@@ -17,41 +15,42 @@ Crowd_detection/
 │   └── video_stream.py    # Video capture utility
 ├── main.py                # Main execution script
 ├── crowd_control.ipynb    # Google Colab notebook
+├── download_weights.py    # Script to download CSRNet weights
 ├── requirements.txt       # Dependencies
 └── README.md              # This file
 ```
 
-## Setup & Installation
+## How to Run on Google Colab (with GPU)
 
-1. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1.  **Open the Notebook**:
+    - Go to [Google Colab](https://colab.research.google.com/).
+    - Click **File -> Upload notebook** and select the `crowd_control.ipynb` file from this repository.
 
-2. **Download Weights**:
-   - **YOLOv8**: `yolov8n.pt` will be automatically downloaded by the `ultralytics` library on first run.
-   - **CSRNet**: You need to place the pre-trained CSRNet weights file (e.g., `csrnet_weights.pth`) in the project root. If not provided, the system will run with initialized (random) weights for the CSRNet part (warning will be displayed).
+2.  **Enable GPU**:
+    - In Colab, go to **Runtime -> Change runtime type**.
+    - Select **T4 GPU**.
+    - Click **Save**.
 
-## Usage
+3.  **Run the Cells**:
+    - Run the cells sequentially.
+    - **Note**: The notebook is now configured to **automatically download** the `csrnet_weights.pth` file. You do NOT need to upload it manually.
 
-### Local Execution
-Run the `main.py` script:
-```bash
-python main.py --source video.mp4 --threshold 50
-```
+4.  **Upload Input Video**:
+    - You still need to **manually upload** your `video.mp4` to the Colab session files (left sidebar).
 
-**Arguments**:
-- `--source`: Path to video file or `0` for webcam.
-- `--threshold`: Count threshold for switching to CSRNet and triggering high-density alerts.
-- `--yolo`: Path to YOLO weights (default: `yolov8n.pt`).
-- `--csrnet`: Path to CSRNet weights (default: `csrnet_weights.pth`).
+5.  **Execute**:
+    - Run the final cell to process the video.
+    - Download `output.mp4` from the files sidebar.
 
-### Google Colab Execution
-1. Upload the `Crowd_detection` folder to your Google Drive.
-2. Open `crowd_control.ipynb` in Google Colab.
-3. specific paths in the notebook to match your Drive structure (e.g., `/content/drive/MyDrive/BE Project/Crowd_detection`).
-4. Run the cells to install dependencies and execute the crowd analysis.
+## Local Usage
 
-## Alert System
-- **Console Alert**: Prints `ALERT: HIGH DENSITY` in red text when count > threshold.
-- **Visual Alert**: Overlays "ALERT: HIGH DENSITY" on the output video.
+1.  **Download Weights**:
+    Run the helper script to download CSRNet weights:
+    ```bash
+    python download_weights.py
+    ```
+
+2.  **Run Main Script**:
+    ```bash
+    python main.py --source video.mp4 --threshold 50
+    ```
