@@ -54,9 +54,8 @@ st.markdown("""
 
 # Sidebar Configuration
 st.sidebar.title("🔧 Settings")
-source_radio = st.sidebar.radio("Video Source", ["Sample Video", "Upload Video", "Webcam (Local Only)"])
+source_radio = st.sidebar.radio("Video Source", ["Sample Video", "Upload Video", "Webcam"])
 threshold = st.sidebar.slider("⚠️ Density Threshold (Alert)", 10, 500, 50)
-capacity = st.sidebar.number_input("🏗️ Safe Capacity", value=150)
 model_select = st.sidebar.selectbox("Model Preference", ["Auto (Hybrid)", "YOLOv8 Only", "CSRNet Only"])
 run_app = st.sidebar.button("🚀 Start Monitoring")
 
@@ -111,7 +110,7 @@ if run_app:
             tfile = tempfile.NamedTemporaryFile(delete=False)
             tfile.write(uploaded_file.read())
             cap = cv2.VideoCapture(tfile.name)
-    elif source_radio == "Webcam (Local Only)":
+    elif source_radio == "Webcam":
         cap = cv2.VideoCapture(0)
 
     if cap is None or not cap.isOpened():
@@ -123,9 +122,6 @@ if run_app:
         peak_count = 0
         prev_time = time.time()
         
-        frame_skip = 2 # Process every 3rd frame
-        frame_idx = 0
-        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -134,13 +130,6 @@ if run_app:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 break
-            
-            frame_idx += 1
-            if frame_idx % (frame_skip + 1) != 0:
-                continue
-
-            # Resize frame for faster processing and transmission
-            frame = cv2.resize(frame, (640, 360))
             
             # FPS Calculation
             curr_time = time.time()
@@ -167,23 +156,44 @@ if run_app:
             # To avoid oscillation, we can use a simple state check if we tracked state.
             # Here we default to YOLO unless forced or high count derived from YOLO
             
+            # YOLO Detection (always run first for initial count)
             count, boxes, annotated_frame = yolo_model.detect(frame)
             mode = "YOLO"
             
-            # If hybrid and high count, re-run with CSRNet (more accurate for dense) or just switch visualization
-            if (model_select == "Auto (Hybrid)" and count >= threshold) or model_select == "CSRNet Only":
+            # Model Switching Logic:
+            # - YOLO: Good for sparse/medium crowds (< 20 people, minimal overlapping)
+            # - CSRNet: Good for dense crowds (>= 20 people, overlapping people)
+            # Note: This is independent of the alert threshold!
+            
+            density_switch_threshold = 20  # Switch to CSRNet when crowd gets dense
+            
+            if model_select == "CSRNet Only":
+                # Force CSRNet mode
                 c_count, density_map = csrnet_model.estimate(frame)
-                
-                # Apply Calibration Factor (User reported 4 is too low, so boosting significantly)
-                calibration_factor = 10.0 
+                calibration_factor = 25.0
                 count = int(abs(c_count) * calibration_factor)
                 mode = "CSRNet"
                 
-                # Visualize Density
+                # Visualize Density Map
                 density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-5)
                 density_map_color = cv2.applyColorMap((density_map_norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
                 density_map_color = cv2.resize(density_map_color, (frame.shape[1], frame.shape[0]))
                 annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
+                
+            elif model_select == "Auto (Hybrid)" and count >= density_switch_threshold:
+                # Auto mode: Switch to CSRNet when density is high (people overlapping)
+                c_count, density_map = csrnet_model.estimate(frame)
+                calibration_factor = 25.0
+                count = int(abs(c_count) * calibration_factor)
+                mode = "CSRNet"
+                
+                # Visualize Density Map
+                density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-5)
+                density_map_color = cv2.applyColorMap((density_map_norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
+                density_map_color = cv2.resize(density_map_color, (frame.shape[1], frame.shape[0]))
+                annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
+            
+            # If YOLOv8 Only or count < density_switch_threshold, stay in YOLO mode
             
             # 2. Metrics Update
             if count > peak_count:
@@ -192,12 +202,9 @@ if run_app:
             # Status
             status_text = "🟢 SAFE"
             status_color = "#00FF00" # Green
-            if count > capacity:
-                 status_text = "🔴 OVER CAPACITY"
-                 status_color = "#FF0000"
-            elif count >= threshold:
-                status_text = "🟡 MODERATE / HIGH"
-                status_color = "#FFA500" # Orange
+            if count >= threshold:
+                status_text = "🔴 ALERT"
+                status_color = "#FF0000" # Red
                 
             # Render KPIs (Using HTML for nice formatting)
             kpi_count.markdown(f"""
@@ -225,17 +232,9 @@ if run_app:
 
             # 3. Alert System
             if count >= threshold:
-                alert_text = f"🚨 ALERT: CROWD LIMIT EXCEEDED ({count} > {threshold})"
-                alert_placeholder.markdown(f"<div class='alert-box'>{alert_text}</div>", unsafe_allow_html=True)
+                alert_placeholder.markdown(f"<div class='alert-box'>🚨 ALERT: CROWD LIMIT EXCEEDED ({count} > {threshold})</div>", unsafe_allow_html=True)
                 # Overlay on video
                 cv2.putText(annotated_frame, f"ALERT: {count}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
-                
-                # Toast Notification (Non-blocking)
-                if frame_idx % 10 == 0:
-                    st.toast(alert_text, icon="🚨")
-                
-                # Audio Alert (Optional - requires browser interaction usually, specific implementation depends on need)
-                # st.audio("alert.mp3") 
             else:
                 alert_placeholder.empty()
 
@@ -249,12 +248,11 @@ if run_app:
             new_row = pd.DataFrame({'Time': [now], 'Count': [count]})
             df_log = pd.concat([df_log, new_row], ignore_index=True)
             
-            # Keep last 100 points
+            # Keep last 100 points for performance
             if len(df_log) > 100:
                 df_log = df_log.iloc[-100:]
             
-            # Use Streamlit's native line chart, potentially update less frequently
-            if frame_idx % 6 == 0: # Update chart every 6th processed frame (approx 2x per sec)
-                 chart_placeholder.line_chart(df_log.set_index('Time'))
+            # Use Streamlit's native line chart
+            chart_placeholder.line_chart(df_log.set_index('Time'))
             
             # Stop button logic handled by Streamlit rerun implicitly on logic change
