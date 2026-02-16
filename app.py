@@ -54,7 +54,7 @@ st.markdown("""
 
 # Sidebar Configuration
 st.sidebar.title("🔧 Settings")
-source_radio = st.sidebar.radio("Video Source", ["Sample Video", "Upload Video", "Webcam"])
+source_radio = st.sidebar.radio("Video Source", ["Sample Video", "Upload Video", "Webcam (Local Only)"])
 threshold = st.sidebar.slider("⚠️ Density Threshold (Alert)", 10, 500, 50)
 capacity = st.sidebar.number_input("🏗️ Safe Capacity", value=150)
 model_select = st.sidebar.selectbox("Model Preference", ["Auto (Hybrid)", "YOLOv8 Only", "CSRNet Only"])
@@ -111,7 +111,7 @@ if run_app:
             tfile = tempfile.NamedTemporaryFile(delete=False)
             tfile.write(uploaded_file.read())
             cap = cv2.VideoCapture(tfile.name)
-    elif source_radio == "Webcam":
+    elif source_radio == "Webcam (Local Only)":
         cap = cv2.VideoCapture(0)
 
     if cap is None or not cap.isOpened():
@@ -222,9 +222,17 @@ if run_app:
 
             # 3. Alert System
             if count >= threshold:
-                alert_placeholder.markdown(f"<div class='alert-box'>🚨 ALERT: CROWD LIMIT EXCEEDED ({count} > {threshold})</div>", unsafe_allow_html=True)
+                alert_text = f"🚨 ALERT: CROWD LIMIT EXCEEDED ({count} > {threshold})"
+                alert_placeholder.markdown(f"<div class='alert-box'>{alert_text}</div>", unsafe_allow_html=True)
                 # Overlay on video
                 cv2.putText(annotated_frame, f"ALERT: {count}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
+                
+                # Toast Notification (Non-blocking)
+                if frame_idx % 10 == 0:
+                    st.toast(alert_text, icon="🚨")
+                
+                # Audio Alert (Optional - requires browser interaction usually, specific implementation depends on need)
+                # st.audio("alert.mp3") 
             else:
                 alert_placeholder.empty()
 
