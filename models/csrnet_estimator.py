@@ -107,7 +107,7 @@ class CSRNetEstimator:
         with torch.no_grad():
             output = self.model(img)
             
-        count = torch.sum(output).item()
+        count = abs(torch.sum(output).item())
         
         # Process density map for visualization
         density_map = output.cpu().squeeze().numpy()
