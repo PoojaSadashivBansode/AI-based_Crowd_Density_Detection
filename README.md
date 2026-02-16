@@ -56,9 +56,11 @@ Crowd_detection/
 4.  **Upload Input Video**:
     - You still need to **manually upload** your `video.mp4` to the Colab session files (left sidebar).
 
-5.  **Execute**:
-    - Run the final cell to process the video.
-    - Download `output.mp4` from the files sidebar.
+5.  **Run Dashboard in Colab**:
+    - Scroll to the bottom and run the **"Run Dashboard in Colab"** cell.
+    - Click the link provided by `localtunnel` and assume the password is the IP address printed.
+    - **Performance Note**: The dashboard in Colab may be slow due to network tunneling. I have optimized `app.py` to skip frames and use lower resolution for better speed.
+    - **Alternative**: You can use `ngrok` for a faster connection. Add your authtoken in the Colab cell if you have one.
 
 ## Local Usage (Script)
 

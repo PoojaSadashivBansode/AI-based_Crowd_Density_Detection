@@ -123,6 +123,9 @@ if run_app:
         peak_count = 0
         prev_time = time.time()
         
+        frame_skip = 2 # Process every 3rd frame
+        frame_idx = 0
+        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -131,6 +134,13 @@ if run_app:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 break
+            
+            frame_idx += 1
+            if frame_idx % (frame_skip + 1) != 0:
+                continue
+
+            # Resize frame for faster processing and transmission
+            frame = cv2.resize(frame, (640, 360))
             
             # FPS Calculation
             curr_time = time.time()
@@ -219,8 +229,8 @@ if run_app:
                 alert_placeholder.empty()
 
             # 4. Video Display
-            annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-            video_placeholder.image(annotated_frame, channels="RGB", use_column_width=True)
+            # Convert color space only when displaying
+            video_placeholder.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
 
             # 5. Graph Update
             # Append new data
@@ -228,11 +238,12 @@ if run_app:
             new_row = pd.DataFrame({'Time': [now], 'Count': [count]})
             df_log = pd.concat([df_log, new_row], ignore_index=True)
             
-            # Keep last 100 points for performance
+            # Keep last 100 points
             if len(df_log) > 100:
                 df_log = df_log.iloc[-100:]
             
-            # Use Streamlit's native line chart
-            chart_placeholder.line_chart(df_log.set_index('Time'))
+            # Use Streamlit's native line chart, potentially update less frequently
+            if frame_idx % 6 == 0: # Update chart every 6th processed frame (approx 2x per sec)
+                 chart_placeholder.line_chart(df_log.set_index('Time'))
             
             # Stop button logic handled by Streamlit rerun implicitly on logic change
