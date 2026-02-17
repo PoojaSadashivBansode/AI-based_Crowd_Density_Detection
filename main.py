@@ -163,7 +163,7 @@ def process_video(video_path, threshold=50, yolo_weights='yolov8n.pt', csrnet_we
         if should_switch:
             # Switch to CSRNet for dense crowd estimation
             c_count, density_map = csrnet_model.estimate(frame)
-            calibration_factor = 20.0  # Updated to match app.py
+            calibration_factor = 0.18  # Fixed: was 20.0 (100x too high)
             count = int(abs(c_count) * calibration_factor)
             mode = "CSRNet"
             

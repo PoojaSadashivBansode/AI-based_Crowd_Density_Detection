@@ -297,7 +297,7 @@ if run_app:
             if model_select == "CSRNet Only":
                 # Force CSRNet mode
                 c_count, density_map = csrnet_model.estimate(frame)
-                calibration_factor = 20.0
+                calibration_factor = 0.18  # Fixed: was 20.0 (100x too high)
                 count = int(abs(c_count) * calibration_factor)
                 mode = "CSRNet (Forced)"
                 switch_reason = "Manual selection"
@@ -317,7 +317,7 @@ if run_app:
                 if should_switch:
                     # Switch to CSRNet for dense crowd estimation
                     c_count, density_map = csrnet_model.estimate(frame)
-                    calibration_factor = 25.0
+                    calibration_factor = 0.18  # Fixed: was 25.0 (100x too high)
                     count = int(abs(c_count) * calibration_factor)
                     mode = "CSRNet (Auto)"
                     
