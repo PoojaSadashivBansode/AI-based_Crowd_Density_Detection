@@ -211,12 +211,16 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
     prev_time = time.time()
     count_history = []
     frame_count = 0
+    max_frames = 500  # Increased limit for better demo
     
-    while cap.isOpened() and frame_count < 100:  # Limit frames in Colab
+    while cap.isOpened() and frame_count < max_frames:
         ret, frame = cap.read()
         if not ret:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Loop video
-            continue
+            # Restart video from beginning
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret, frame = cap.read()
+            if not ret:
+                break  # Video error
         
         frame_count += 1
         
@@ -225,13 +229,14 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
         fps = 1 / (curr_time - prev_time + 0.001)
         prev_time = curr_time
         
-        # Processing
-        count, boxes, annotated_frame = yolo_model.detect(frame)
+        # Processing - Initialize based on model selection
+        annotated_frame = frame.copy()
         mode = "YOLO"
         switch_reason = "N/A"
         
         # Multi-factor switching
         if model_select == "CSRNet Only":
+            # Skip YOLO, go straight to CSRNet
             c_count, density_map = csrnet_model.estimate(frame)
             calibration_factor = 0.18
             count = int(abs(c_count) * calibration_factor)
@@ -244,6 +249,9 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
             annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
             
         elif model_select == "Auto (Hybrid)":
+            # Run YOLO first for detection
+            count, boxes, annotated_frame = yolo_model.detect(frame)
+            
             should_switch, switch_reason = should_switch_to_csrnet(
                 count, boxes, frame.shape, count_history, count_threshold=30
             )
@@ -260,6 +268,11 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
                 annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
             else:
                 switch_reason = "Sparse crowd detected"
+        else:
+            # YOLOv8 Only mode
+            count, boxes, annotated_frame = yolo_model.detect(frame)
+            mode = "YOLO"
+            switch_reason = "Manual selection"
         
         # Update count history
         count_history.append(count)
