@@ -179,7 +179,7 @@ def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_thresh
 # Sidebar Configuration
 st.sidebar.title("🔧 Settings")
 source_radio = st.sidebar.radio("Video Source", ["Sample Video", "Upload Video", "Webcam"])
-threshold = st.sidebar.slider("⚠️ Density Threshold (Alert)", 10, 500, 50)
+threshold = st.sidebar.number_input("⚠️ Density Threshold (Alert)", min_value=10, max_value=500, value=50, step=5)
 model_select = st.sidebar.selectbox("Model Preference", ["Auto (Hybrid)", "YOLOv8 Only", "CSRNet Only"])
 enable_alarm = st.sidebar.checkbox("🔔 Enable Alarm Sound", value=True)
 run_app = st.sidebar.button("🚀 Start Monitoring")
