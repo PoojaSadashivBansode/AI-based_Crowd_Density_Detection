@@ -5,6 +5,98 @@ from models.yolo_detector import YoloDetector
 from models.csrnet_estimator import CSRNetEstimator
 from utils.alert_system import AlertSystem
 
+# Multi-Factor Model Switching Helper Functions
+def calculate_box_overlap_ratio(boxes):
+    """
+    Calculate the overlap ratio between bounding boxes.
+    High overlap indicates dense crowd where YOLO becomes unreliable.
+    """
+    if len(boxes) < 2:
+        return 0.0
+    
+    total_overlap = 0
+    total_area = 0
+    
+    for i, box1 in enumerate(boxes):
+        x1_min, y1_min, x1_max, y1_max = box1
+        area1 = (x1_max - x1_min) * (y1_max - y1_min)
+        total_area += area1
+        
+        for box2 in boxes[i+1:]:
+            x2_min, y2_min, x2_max, y2_max = box2
+            
+            # Calculate intersection
+            x_overlap = max(0, min(x1_max, x2_max) - max(x1_min, x2_min))
+            y_overlap = max(0, min(y1_max, y2_max) - max(y1_min, y2_min))
+            overlap_area = x_overlap * y_overlap
+            total_overlap += overlap_area
+    
+    if total_area == 0:
+        return 0.0
+    return min(1.0, total_overlap / total_area)
+
+def calculate_crowd_coverage(boxes, frame_shape):
+    """
+    Calculate what percentage of the frame is occupied by detected people.
+    High coverage indicates dense crowd.
+    """
+    if len(boxes) == 0:
+        return 0.0
+    
+    frame_area = frame_shape[0] * frame_shape[1]
+    total_box_area = 0
+    
+    for box in boxes:
+        x_min, y_min, x_max, y_max = box
+        box_area = (x_max - x_min) * (y_max - y_min)
+        total_box_area += box_area
+    
+    coverage = total_box_area / frame_area
+    return min(1.0, coverage)
+
+def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_threshold=30):
+    """
+    Multi-factor decision function to switch from YOLO to CSRNet.
+    
+    Factors:
+    1. YOLO count >= threshold (30)
+    2. High bounding box overlap (>= 0.15)
+    3. High crowd coverage area (>= 0.25)
+    4. Sudden drop in count (potential occlusion)
+    
+    Returns:
+        bool: True if should switch to CSRNet
+        str: Reason for switching
+    """
+    reasons = []
+    
+    # Factor 1: Count threshold
+    if count >= count_threshold:
+        reasons.append(f"High count ({count} >= {count_threshold})")
+    
+    # Factor 2: Bounding box overlap
+    overlap_ratio = calculate_box_overlap_ratio(boxes)
+    if overlap_ratio >= 0.15:
+        reasons.append(f"High overlap ({overlap_ratio:.2%})")
+    
+    # Factor 3: Crowd coverage
+    coverage = calculate_crowd_coverage(boxes, frame_shape)
+    if coverage >= 0.25:
+        reasons.append(f"High coverage ({coverage:.2%})")
+    
+    # Factor 4: Sudden drop detection
+    if len(prev_counts) >= 3:
+        avg_recent = np.mean(prev_counts[-3:])
+        if avg_recent > count_threshold and count < avg_recent * 0.7:
+            reasons.append(f"Sudden drop ({count} < {avg_recent:.0f})")
+    
+    # Switch if at least 2 factors are triggered
+    should_switch = len(reasons) >= 2
+    reason_str = ", ".join(reasons) if reasons else "None"
+    
+    return should_switch, reason_str
+
+
 def process_video(video_path, threshold=50, yolo_weights='yolov8n.pt', csrnet_weights='csrnet_weights.pth', output_path='output.mp4'):
     """
     Main processing loop for crowd density prediction.
@@ -42,14 +134,14 @@ def process_video(video_path, threshold=50, yolo_weights='yolov8n.pt', csrnet_we
     import datetime
     log_file = open('crowd_data.csv', 'w', newline='')
     csv_writer = csv.writer(log_file)
-    csv_writer.writerow(['Timestamp', 'Frame', 'Mode', 'Count', 'Alert'])
+    csv_writer.writerow(['Timestamp', 'Frame', 'Mode', 'Count', 'Alert', 'Switch_Reason'])
 
     # Initial state
-    use_yolo = True
     frame_count = 0
+    count_history = []  # Track count history for sudden drop detection
     
-    # For smoothing
-    count_history = []
+    print("Starting video processing with multi-factor model switching...")
+    print("Factors: Count>=30, Overlap>=15%, Coverage>=25%, Sudden drops")
     
     while cap.isOpened():
         ret, frame = cap.read()
@@ -58,59 +150,58 @@ def process_video(video_path, threshold=50, yolo_weights='yolov8n.pt', csrnet_we
             
         frame_count += 1
         
-        # Decision logic: Switch based on recent average count
-        # To avoid flickering, we can use a hysteresis or just check the last count
-        # For simplicity: if last count < threshold -> YOLO, else CSRNet
-        # But if we are in CSRNet mode and count drops, we switch back.
+        # Always start with YOLO detection
+        count, boxes, annotated_frame = yolo_model.detect(frame)
+        mode = "YOLO"
+        switch_reason = "Sparse crowd"
         
-        current_count = 0
-        annotated_frame = frame.copy()
+        # Multi-factor decision: Should we switch to CSRNet?
+        should_switch, switch_reason = should_switch_to_csrnet(
+            count, boxes, frame.shape, count_history, count_threshold=30
+        )
         
-        if use_yolo:
-            count, boxes, annotated_frame = yolo_model.detect(frame)
-            current_count = count
-            cv2.putText(annotated_frame, f"Mode: YOLO | Count: {count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            
-            # Check if we should switch to CSRNet
-            if count >= threshold:
-                use_yolo = False
-                print(f"Frame {frame_count}: Switching to CSRNet (High Density)")
-        else:
-            count, density_map = csrnet_model.estimate(frame)
-            current_count = int(count)
+        if should_switch:
+            # Switch to CSRNet for dense crowd estimation
+            c_count, density_map = csrnet_model.estimate(frame)
+            calibration_factor = 20.0  # Updated to match app.py
+            count = int(abs(c_count) * calibration_factor)
+            mode = "CSRNet"
             
             # Visualize density map
-            # Normalize density map for display
             density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-5)
             density_map_color = cv2.applyColorMap((density_map_norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
             density_map_color = cv2.resize(density_map_color, (width, height))
-            
-            # Overlay
             annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
-            cv2.putText(annotated_frame, f"Mode: CSRNet | Count: {int(count)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             
-            # Check if we should switch to YOLO
-            if count < threshold:
-                use_yolo = True
-                print(f"Frame {frame_count}: Switching to YOLO (Low Density)")
+            if frame_count % 30 == 0:  # Log every 30 frames to avoid spam
+                print(f"Frame {frame_count}: Using CSRNet - {switch_reason}")
+        
+        # Update count history (keep last 10)
+        count_history.append(count)
+        if len(count_history) > 10:
+            count_history.pop(0)
+        
+        # Add model info overlay
+        model_color = (0, 255, 255) if mode == "CSRNet" else (255, 150, 0)
+        cv2.putText(annotated_frame, f"Model: {mode} | Count: {count}", (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, model_color, 2)
+        
+        if switch_reason and switch_reason != "Sparse crowd":
+            cv2.putText(annotated_frame, f"Reason: {switch_reason}", (10, 60), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
         # Alert Check
-        triggered, msg = alert_system.check_alert(current_count)
+        triggered, msg = alert_system.check_alert(count)
         if triggered:
-            cv2.putText(annotated_frame, "ALERT: HIGH DENSITY", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+            cv2.putText(annotated_frame, "ALERT: HIGH DENSITY", (10, 90), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
 
         # Log to CSV
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        mode_str = "YOLO" if use_yolo else "CSRNet"
         alert_str = "YES" if triggered else "NO"
-        csv_writer.writerow([timestamp, frame_count, mode_str, current_count, alert_str])
+        csv_writer.writerow([timestamp, frame_count, mode, count, alert_str, switch_reason])
 
         out.write(annotated_frame)
-        
-        # Optional: Display if running locally (not in typical Colab batch mode, though cv2_imshow helps there)
-        # cv2.imshow('Crowd Control', annotated_frame)
-        # if cv2.waitKey(1) & 0xFF == ord('q'):
-        #    break
 
     cap.release()
     out.release()
