@@ -7,6 +7,9 @@ import datetime
 from models.yolo_detector import YoloDetector
 from models.csrnet_estimator import CSRNetEstimator
 import tempfile
+import base64
+from io import BytesIO
+import wave
 
 # Page Config
 st.set_page_config(
@@ -52,11 +55,133 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+# Generate Alarm Sound
+def generate_alarm_sound():
+    """Generate a simple alarm beep sound"""
+    sample_rate = 44100
+    duration = 0.5  # seconds
+    frequency = 800  # Hz (beep tone)
+    
+    # Generate sine wave
+    t = np.linspace(0, duration, int(sample_rate * duration))
+    audio_data = np.sin(2 * np.pi * frequency * t)
+    
+    # Create repeating beeps (3 beeps)
+    silence = np.zeros(int(sample_rate * 0.2))
+    alarm = np.concatenate([audio_data, silence, audio_data, silence, audio_data])
+    
+    # Convert to 16-bit PCM
+    alarm = (alarm * 32767).astype(np.int16)
+    
+    # Create WAV file in memory
+    buffer = BytesIO()
+    with wave.open(buffer, 'wb') as wav_file:
+        wav_file.setnchannels(1)  # Mono
+        wav_file.setsampwidth(2)  # 16-bit
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(alarm.tobytes())
+    
+    buffer.seek(0)
+    return buffer.getvalue()
+
+# Multi-Factor Model Switching Helper Functions
+def calculate_box_overlap_ratio(boxes):
+    """
+    Calculate the overlap ratio between bounding boxes.
+    High overlap indicates dense crowd where YOLO becomes unreliable.
+    """
+    if len(boxes) < 2:
+        return 0.0
+    
+    total_overlap = 0
+    total_area = 0
+    
+    for i, box1 in enumerate(boxes):
+        x1_min, y1_min, x1_max, y1_max = box1
+        area1 = (x1_max - x1_min) * (y1_max - y1_min)
+        total_area += area1
+        
+        for box2 in boxes[i+1:]:
+            x2_min, y2_min, x2_max, y2_max = box2
+            
+            # Calculate intersection
+            x_overlap = max(0, min(x1_max, x2_max) - max(x1_min, x2_min))
+            y_overlap = max(0, min(y1_max, y2_max) - max(y1_min, y2_min))
+            overlap_area = x_overlap * y_overlap
+            total_overlap += overlap_area
+    
+    # Return overlap ratio (0 to 1)
+    if total_area == 0:
+        return 0.0
+    return min(1.0, total_overlap / total_area)
+
+def calculate_crowd_coverage(boxes, frame_shape):
+    """
+    Calculate what percentage of the frame is occupied by detected people.
+    High coverage indicates dense crowd.
+    """
+    if len(boxes) == 0:
+        return 0.0
+    
+    frame_area = frame_shape[0] * frame_shape[1]
+    total_box_area = 0
+    
+    for box in boxes:
+        x_min, y_min, x_max, y_max = box
+        box_area = (x_max - x_min) * (y_max - y_min)
+        total_box_area += box_area
+    
+    coverage = total_box_area / frame_area
+    return min(1.0, coverage)  # Cap at 100%
+
+def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_threshold=30):
+    """
+    Multi-factor decision function to switch from YOLO to CSRNet.
+    
+    Factors:
+    1. YOLO count >= threshold (30)
+    2. High bounding box overlap (>= 0.15)
+    3. High crowd coverage area (>= 0.25)
+    4. Sudden drop in count (potential occlusion)
+    
+    Returns:
+        bool: True if should switch to CSRNet
+        str: Reason for switching
+    """
+    reasons = []
+    
+    # Factor 1: Count threshold
+    if count >= count_threshold:
+        reasons.append(f"High count ({count} ≥ {count_threshold})")
+    
+    # Factor 2: Bounding box overlap
+    overlap_ratio = calculate_box_overlap_ratio(boxes)
+    if overlap_ratio >= 0.15:  # 15% overlap threshold
+        reasons.append(f"High overlap ({overlap_ratio:.2%})")
+    
+    # Factor 3: Crowd coverage
+    coverage = calculate_crowd_coverage(boxes, frame_shape)
+    if coverage >= 0.25:  # 25% frame coverage
+        reasons.append(f"High coverage ({coverage:.2%})")
+    
+    # Factor 4: Sudden drop detection (if we have history)
+    if len(prev_counts) >= 3:
+        avg_recent = np.mean(prev_counts[-3:])
+        if avg_recent > count_threshold and count < avg_recent * 0.7:
+            reasons.append(f"Sudden drop ({count} < {avg_recent:.0f})")
+    
+    # Switch if at least 2 factors are triggered
+    should_switch = len(reasons) >= 2
+    reason_str = ", ".join(reasons) if reasons else "None"
+    
+    return should_switch, reason_str
+
 # Sidebar Configuration
 st.sidebar.title("🔧 Settings")
 source_radio = st.sidebar.radio("Video Source", ["Sample Video", "Upload Video", "Webcam"])
 threshold = st.sidebar.slider("⚠️ Density Threshold (Alert)", 10, 500, 50)
 model_select = st.sidebar.selectbox("Model Preference", ["Auto (Hybrid)", "YOLOv8 Only", "CSRNet Only"])
+enable_alarm = st.sidebar.checkbox("🔔 Enable Alarm Sound", value=True)
 run_app = st.sidebar.button("🚀 Start Monitoring")
 
 # Initialize Models (Cached)
@@ -121,6 +246,7 @@ if run_app:
         df_log = pd.DataFrame(columns=['Time', 'Count'])
         peak_count = 0
         prev_time = time.time()
+        count_history = []  # Track count history for sudden drop detection
         
         while cap.isOpened():
             ret, frame = cap.read()
@@ -159,20 +285,22 @@ if run_app:
             # YOLO Detection (always run first for initial count)
             count, boxes, annotated_frame = yolo_model.detect(frame)
             mode = "YOLO"
+            switch_reason = "N/A"
             
-            # Model Switching Logic:
-            # - YOLO: Good for sparse/medium crowds (< 20 people, minimal overlapping)
-            # - CSRNet: Good for dense crowds (>= 20 people, overlapping people)
-            # Note: This is independent of the alert threshold!
-            
-            density_switch_threshold = 20  # Switch to CSRNet when crowd gets dense
+            # Multi-Factor Model Switching Logic:
+            # Factor 1: YOLO count threshold (≥ 30)
+            # Factor 2: Bounding box overlap (dense overlapping people)
+            # Factor 3: Crowd coverage area (large portion of frame occupied)
+            # Factor 4: Sudden drop in YOLO count (occlusion detected)
+            # Switch to CSRNet if at least 2 factors are triggered
             
             if model_select == "CSRNet Only":
                 # Force CSRNet mode
                 c_count, density_map = csrnet_model.estimate(frame)
-                calibration_factor = 25.0
+                calibration_factor = 20.0
                 count = int(abs(c_count) * calibration_factor)
-                mode = "CSRNet"
+                mode = "CSRNet (Forced)"
+                switch_reason = "Manual selection"
                 
                 # Visualize Density Map
                 density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-5)
@@ -180,20 +308,33 @@ if run_app:
                 density_map_color = cv2.resize(density_map_color, (frame.shape[1], frame.shape[0]))
                 annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
                 
-            elif model_select == "Auto (Hybrid)" and count >= density_switch_threshold:
-                # Auto mode: Switch to CSRNet when density is high (people overlapping)
-                c_count, density_map = csrnet_model.estimate(frame)
-                calibration_factor = 25.0
-                count = int(abs(c_count) * calibration_factor)
-                mode = "CSRNet"
+            elif model_select == "Auto (Hybrid)":
+                # Intelligent auto-switching based on multiple factors
+                should_switch, switch_reason = should_switch_to_csrnet(
+                    count, boxes, frame.shape, count_history, count_threshold=30
+                )
                 
-                # Visualize Density Map
-                density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-5)
-                density_map_color = cv2.applyColorMap((density_map_norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
-                density_map_color = cv2.resize(density_map_color, (frame.shape[1], frame.shape[0]))
-                annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
+                if should_switch:
+                    # Switch to CSRNet for dense crowd estimation
+                    c_count, density_map = csrnet_model.estimate(frame)
+                    calibration_factor = 25.0
+                    count = int(abs(c_count) * calibration_factor)
+                    mode = "CSRNet (Auto)"
+                    
+                    # Visualize Density Map
+                    density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-5)
+                    density_map_color = cv2.applyColorMap((density_map_norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
+                    density_map_color = cv2.resize(density_map_color, (frame.shape[1], frame.shape[0]))
+                    annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
+                else:
+                    switch_reason = "Sparse crowd detected"
             
-            # If YOLOv8 Only or count < density_switch_threshold, stay in YOLO mode
+            # Update count history (keep last 10 frames)
+            count_history.append(count)
+            if len(count_history) > 10:
+                count_history.pop(0)
+            
+            # If YOLOv8 Only, stay in YOLO mode
             
             # 2. Metrics Update
             if count > peak_count:
@@ -230,11 +371,28 @@ if run_app:
 
             kpi_fps.metric("⚡ Processing Speed", f"{int(fps)} FPS")
 
+            # Display Active Model Info (overlay on frame)
+            model_color = (0, 255, 255) if "CSRNet" in mode else (255, 150, 0)  # Yellow for CSRNet, Orange for YOLO
+            cv2.putText(annotated_frame, f"Model: {mode}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, model_color, 2)
+            if switch_reason and switch_reason != "N/A":
+                cv2.putText(annotated_frame, f"Reason: {switch_reason}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
             # 3. Alert System
             if count >= threshold:
                 alert_placeholder.markdown(f"<div class='alert-box'>🚨 ALERT: CROWD LIMIT EXCEEDED ({count} > {threshold})</div>", unsafe_allow_html=True)
                 # Overlay on video
                 cv2.putText(annotated_frame, f"ALERT: {count}", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
+                
+                # Play alarm sound if enabled
+                if enable_alarm:
+                    alarm_audio = generate_alarm_sound()
+                    audio_base64 = base64.b64encode(alarm_audio).decode()
+                    audio_html = f"""
+                        <audio autoplay>
+                            <source src="data:audio/wav;base64,{audio_base64}" type="audio/wav">
+                        </audio>
+                    """
+                    st.markdown(audio_html, unsafe_allow_html=True)
             else:
                 alert_placeholder.empty()
 
