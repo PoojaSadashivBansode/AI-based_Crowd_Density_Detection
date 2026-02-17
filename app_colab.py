@@ -151,7 +151,7 @@ if not os.path.exists('video.mp4'):
 # Sidebar Configuration (Simplified for Colab)
 st.sidebar.title("🔧 Settings")
 st.sidebar.info("📹 Using video.mp4 from Colab files")
-threshold = st.sidebar.slider("⚠️ Density Threshold (Alert)", 10, 500, 50)
+threshold = st.sidebar.number_input("⚠️ Density Threshold (Alert)", min_value=10, max_value=500, value=50, step=5)
 model_select = st.sidebar.selectbox("Model Preference", ["Auto (Hybrid)", "YOLOv8 Only", "CSRNet Only"])
 enable_alarm = st.sidebar.checkbox("🔔 Enable Alarm Sound", value=False)  # Disabled by default in Colab
 
