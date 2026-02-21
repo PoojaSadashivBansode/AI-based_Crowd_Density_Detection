@@ -218,6 +218,7 @@ with col_video:
     st.subheader("🟢 Live Video Feed")
     video_placeholder = st.empty()
     alert_placeholder = st.empty()
+    info_placeholder = st.empty()
 
 with col_graph:
     st.subheader("📈 Crowd Trend")
@@ -398,19 +399,24 @@ if run_app:
 
             # 4. Video Display
             # Convert color space only when displaying
-            video_placeholder.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
-
+            video_placeholder.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            info_placeholder.info(f"📊 Current Mode: {mode} | Reason: {switch_reason}")
+            
             # 5. Graph Update
             # Append new data
             now = datetime.datetime.now()
             new_row = pd.DataFrame({'Time': [now], 'Count': [count]})
             df_log = pd.concat([df_log, new_row], ignore_index=True)
             
-            # Keep last 100 points for performance
-            if len(df_log) > 100:
-                df_log = df_log.iloc[-100:]
+            # Keep last 50 points for performance
+            if len(df_log) > 50:
+                df_log = df_log.iloc[-50:]
             
             # Use Streamlit's native line chart
             chart_placeholder.line_chart(df_log.set_index('Time'))
             
             # Stop button logic handled by Streamlit rerun implicitly on logic change
+
+            # Control playback speed (adjust for smoother video)
+            time.sleep(0.03)  # ~30 FPS equivalent
+        cap.release()
