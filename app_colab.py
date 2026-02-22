@@ -138,8 +138,9 @@ def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_thresh
         if avg_recent > count_threshold and count < avg_recent * 0.7:
             reasons.append(f"Sudden drop ({count} < {avg_recent:.0f})")
     
-    should_switch = len(reasons) >= 2
-    reason_str = ", ".join(reasons) if reasons else "None"
+    # Relaxed condition: Switch if even 1 factor is triggered
+    should_switch = len(reasons) >= 1
+    reason_str = ", ".join(reasons) if reasons else "Sparse (YOLO)"
     
     return should_switch, reason_str
 
@@ -217,7 +218,8 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
     prev_time = time.time()
     count_history = []
     frame_count = 0
-    max_frames = 500  # Increased limit for better demo
+    max_frames = 1000  # Extended for longer demo
+    csrnet_stability_counter = 0  # To prevent flickering
     
     while cap.isOpened() and frame_count < max_frames:
         ret, frame = cap.read()
@@ -240,14 +242,13 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
         mode = "YOLO"
         switch_reason = "N/A"
         
-        # Multi-factor switching
+        # Multi-factor switching with stability
         if model_select == "CSRNet Only":
-            # Skip YOLO, go straight to CSRNet
             c_count, density_map = csrnet_model.estimate(frame)
             calibration_factor = 0.18
             count = int(abs(c_count) * calibration_factor)
             mode = "CSRNet (Forced)"
-            switch_reason = "Manual selection"
+            switch_reason = "Manual"
             
             density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-7)
             density_map_color = cv2.applyColorMap((density_map_norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
@@ -255,14 +256,22 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
             annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0).astype(np.uint8)
             
         elif model_select == "Auto (Hybrid)":
-            # Run YOLO first for detection
-            count, boxes, annotated_frame = yolo_model.detect(frame)
+            # Check switching factors
+            # We run YOLO first to check detection-based factors
+            temp_count, boxes, temp_annotated = yolo_model.detect(frame)
             
             should_switch, switch_reason = should_switch_to_csrnet(
-                count, boxes, frame.shape, count_history, count_threshold=30
+                temp_count, boxes, frame.shape, count_history, count_threshold=30
             )
             
-            if should_switch:
+            # Use stability counter (if switched to CSRNet, stay for 15 frames)
+            if should_switch or csrnet_stability_counter > 0:
+                if should_switch:
+                    csrnet_stability_counter = 15 # Reset stability frames
+                else:
+                    csrnet_stability_counter -= 1
+                    switch_reason = "(Stabilizing)"
+                
                 c_count, density_map = csrnet_model.estimate(frame)
                 calibration_factor = 0.18
                 count = int(abs(c_count) * calibration_factor)
@@ -273,12 +282,12 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
                 density_map_color = cv2.resize(density_map_color, (frame.shape[1], frame.shape[0]))
                 annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0).astype(np.uint8)
             else:
-                switch_reason = "Sparse crowd detected"
+                count, boxes, annotated_frame = temp_count, boxes, temp_annotated
+                mode = "YOLO"
         else:
-            # YOLOv8 Only mode
             count, boxes, annotated_frame = yolo_model.detect(frame)
-            mode = "YOLO"
-            switch_reason = "Manual selection"
+            mode = "YOLO (Forced)"
+            switch_reason = "Manual"
         
         # Update count history
         count_history.append(count)
@@ -319,11 +328,12 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
 
         kpi_fps.metric("⚡ Processing Speed", f"{int(fps)} FPS")
 
-        # Display Active Model Info
+        # Display Info (overlay on frame)
+        cv2.putText(annotated_frame, f"Frame: {frame_count}", (frame.shape[1]-150, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         model_color = (0, 255, 255) if "CSRNet" in mode else (255, 150, 0)
-        cv2.putText(annotated_frame, f"Model: {mode}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, model_color, 2)
+        cv2.putText(annotated_frame, f"Mode: {mode}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, model_color, 2)
         if switch_reason and switch_reason != "N/A":
-            cv2.putText(annotated_frame, f"Reason: {switch_reason}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+            cv2.putText(annotated_frame, f"Trigger: {switch_reason}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
         # Alert System
         if count >= threshold:
@@ -359,7 +369,7 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
         
         chart_placeholder.line_chart(df_log.set_index('Time'))
         
-        time.sleep(0.1)  # Slow down for Colab
+        time.sleep(0.01)  # Faster loop
     
     cap.release()
     st.success("✅ Monitoring complete!")
