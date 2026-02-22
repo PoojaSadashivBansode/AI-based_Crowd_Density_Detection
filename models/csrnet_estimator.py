@@ -112,4 +112,7 @@ class CSRNetEstimator:
         # Process density map for visualization
         density_map = output.cpu().squeeze().numpy()
         
+        # Ensure density map is valid for display
+        density_map = np.nan_to_num(density_map) 
+        
         return count, density_map

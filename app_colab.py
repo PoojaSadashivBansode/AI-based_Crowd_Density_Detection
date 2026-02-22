@@ -164,8 +164,14 @@ def load_models():
     except:
         st.sidebar.warning("CSRNet weights not found. Using initialized weights.")
         csrnet = CSRNetEstimator(None)
+    
+    # Device status for debugging
+    device = "GPU 🚀" if torch.cuda.is_available() else "CPU 💻"
+    st.sidebar.success(f"Running on: {device}")
+    
     return yolo, csrnet
 
+import torch # Import needed for device check
 yolo_model, csrnet_model = load_models()
 
 # Main Layout
@@ -243,10 +249,10 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
             mode = "CSRNet (Forced)"
             switch_reason = "Manual selection"
             
-            density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-5)
+            density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-7)
             density_map_color = cv2.applyColorMap((density_map_norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
             density_map_color = cv2.resize(density_map_color, (frame.shape[1], frame.shape[0]))
-            annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
+            annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0).astype(np.uint8)
             
         elif model_select == "Auto (Hybrid)":
             # Run YOLO first for detection
@@ -262,10 +268,10 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
                 count = int(abs(c_count) * calibration_factor)
                 mode = "CSRNet (Auto)"
                 
-                density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-5)
+                density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-7)
                 density_map_color = cv2.applyColorMap((density_map_norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
                 density_map_color = cv2.resize(density_map_color, (frame.shape[1], frame.shape[0]))
-                annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
+                annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0).astype(np.uint8)
             else:
                 switch_reason = "Sparse crowd detected"
         else:
@@ -336,8 +342,12 @@ if st.sidebar.button("🚀 Start Monitoring") or 'monitoring' in st.session_stat
         else:
             alert_placeholder.empty()
 
-        # Video Display
-        video_placeholder.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+        # Video Display (BGR to RGB and uint8 conversion)
+        try:
+            display_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB).astype(np.uint8)
+            video_placeholder.image(display_frame, channels="RGB", use_container_width=True)
+        except Exception as e:
+            st.error(f"Render Error: {e}")
 
         # Graph Update
         now = datetime.datetime.now()
