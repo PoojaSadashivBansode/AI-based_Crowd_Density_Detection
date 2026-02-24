@@ -127,8 +127,11 @@ def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_thresh
 # Sidebar Configuration
 # ──────────────────────────────────────────────
 st.sidebar.title("🔧 Settings")
-source_radio = st.sidebar.radio("Video Source", ["Sample Video", "Upload Video"])
-# Note: Webcam is not available on Colab — use Sample or Upload
+source_radio = st.sidebar.radio("Video Source", ["Sample Video", "Upload Video", "Webcam"])
+# ⚠️ Webcam works only with a Local Colab Runtime (Runtime → Change runtime type → Local)
+# It will NOT work on the default cloud T4/GPU runtime (no physical webcam on remote servers)
+if source_radio == "Webcam":
+    st.sidebar.info("⚠️ Webcam requires a Local Colab Runtime. Cloud runtime has no webcam.")
 
 # File uploader MUST be outside run block so it persists across Streamlit reruns
 if source_radio == "Upload Video":
@@ -213,6 +216,8 @@ if st.session_state.get("running", False):
             cap = cv2.VideoCapture(video_path)
         else:
             st.warning("Please upload a video file and click Start again.")
+    elif source_radio == "Webcam":
+        cap = cv2.VideoCapture(0)
 
     if cap is None or not cap.isOpened():
         st.error("Error loading video source.")
@@ -230,9 +235,11 @@ if st.session_state.get("running", False):
 
             ret, frame = cap.read()
             if not ret:
-                # Loop video at end
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                continue
+                # Loop video at end (not for webcam)
+                if source_radio != "Webcam":
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    continue
+                break
 
             # FPS
             curr_time = time.time()
