@@ -97,7 +97,7 @@ def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_thresh
     return should_switch, reason_str
 
 
-def process_video(video_path, threshold=50, yolo_weights='yolov8n.pt', csrnet_weights='csrnet_weights.pth', output_path='output.mp4'):
+def process_video(video_path, threshold=50, yolo_weights='yolov8s.pt', csrnet_weights='csrnet_weights.pth', output_path='output.mp4'):
     """
     Main processing loop for crowd density prediction.
     """
@@ -163,8 +163,8 @@ def process_video(video_path, threshold=50, yolo_weights='yolov8n.pt', csrnet_we
         if should_switch:
             # Switch to CSRNet for dense crowd estimation
             c_count, density_map = csrnet_model.estimate(frame)
-            calibration_factor = 0.18  # Fixed: was 20.0 (100x too high)
-            count = int(abs(c_count) * calibration_factor)
+            csrnet_scale = 0.20  # Consistent with app.py and app_colab.py
+            count = int(c_count * csrnet_scale)
             mode = "CSRNet"
             
             # Visualize density map

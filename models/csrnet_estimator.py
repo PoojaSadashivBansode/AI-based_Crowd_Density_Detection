@@ -15,7 +15,8 @@ class CSRNet(nn.Module):
         self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
         
         if not load_weights:
-            mod = models.vgg16(pretrained=True)
+            from torchvision.models import vgg16, VGG16_Weights
+            mod = vgg16(weights=VGG16_Weights.DEFAULT)
             self._initialize_weights()
             # Copy specific weights from VGG16
             for i in range(len(self.frontend.state_dict().items())):
