@@ -179,10 +179,37 @@ def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_thresh
 # Sidebar Configuration
 st.sidebar.title("🔧 Settings")
 source_radio = st.sidebar.radio("Video Source", ["Sample Video", "Upload Video", "Webcam"])
+
+# File uploader MUST be outside run_app block so it persists across reruns
+uploaded_file = None
+if source_radio == "Upload Video":
+    uploaded_file = st.sidebar.file_uploader("📂 Choose a video file", type=["mp4", "avi", "mov"])
+    if uploaded_file is not None:
+        # Save to temp file and store path in session_state so it survives reruns
+        tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        tfile.write(uploaded_file.read())
+        tfile.flush()
+        st.session_state["uploaded_video_path"] = tfile.name
+    elif "uploaded_video_path" not in st.session_state:
+        st.sidebar.info("Please upload a video file first.")
+
 threshold = st.sidebar.number_input("⚠️ Density Threshold (Alert)", min_value=10, max_value=500, value=50, step=5)
 model_select = st.sidebar.selectbox("Model Preference", ["Auto (Hybrid)", "YOLOv8 Only", "CSRNet Only"])
 enable_alarm = st.sidebar.checkbox("🔔 Enable Alarm Sound", value=True)
-run_app = st.sidebar.button("🚀 Start Monitoring")
+
+col_start, col_stop = st.sidebar.columns(2)
+run_app = col_start.button("🚀 Start", use_container_width=True)
+stop_app = col_stop.button("⏹ Stop", use_container_width=True)
+
+if stop_app:
+    st.session_state["running"] = False
+
+if run_app:
+    st.session_state["running"] = True
+
+# CSRNet calibration: official weights trained on ShanghaiTech Part A (500+ dense crowds)
+# tend to overcount on normal scenes. Fixed scale factor tuned for this project's video.
+csrnet_scale = 0.20
 
 # Initialize Models (Cached)
 @st.cache_resource
@@ -224,17 +251,17 @@ with col_graph:
     chart_placeholder = st.empty()
     
 # Logic
-if run_app:
+if st.session_state.get("running", False):
     # Video Source Logic
     cap = None
     if source_radio == "Sample Video":
         cap = cv2.VideoCapture("video.mp4")
     elif source_radio == "Upload Video":
-        uploaded_file = st.sidebar.file_uploader("Choose a video...", type=["mp4", "avi", "mov"])
-        if uploaded_file is not None:
-            tfile = tempfile.NamedTemporaryFile(delete=False)
-            tfile.write(uploaded_file.read())
-            cap = cv2.VideoCapture(tfile.name)
+        video_path = st.session_state.get("uploaded_video_path")
+        if video_path:
+            cap = cv2.VideoCapture(video_path)
+        else:
+            st.warning("Please upload a video file and click Start again.")
     elif source_radio == "Webcam":
         cap = cv2.VideoCapture(0)
 
@@ -249,10 +276,15 @@ if run_app:
         count_history = []  # Track count history for sudden drop detection
         
         while cap.isOpened():
+            # Stop if user clicked the Stop button
+            if not st.session_state.get("running", False):
+                cap.release()
+                break
+
             ret, frame = cap.read()
             if not ret:
-                # Loop video if sample
-                if source_radio == "Sample Video":
+                # Loop video if sample/uploaded; stop for webcam
+                if source_radio in ("Sample Video", "Upload Video"):
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 break
@@ -297,17 +329,17 @@ if run_app:
             if model_select == "CSRNet Only":
                 # Force CSRNet mode
                 c_count, density_map = csrnet_model.estimate(frame)
-                calibration_factor = 0.18  # Fixed: was 20.0 (100x too high)
-                count = int(abs(c_count) * calibration_factor)
+                # Apply scene calibration factor (CSRNet trained on dense crowds, may overcount)
+                count = int(c_count * csrnet_scale)
                 mode = "CSRNet (Forced)"
                 switch_reason = "Manual selection"
-                
+
                 # Visualize Density Map
                 density_map_norm = (density_map - density_map.min()) / (density_map.max() - density_map.min() + 1e-5)
                 density_map_color = cv2.applyColorMap((density_map_norm * 255).astype(np.uint8), cv2.COLORMAP_JET)
                 density_map_color = cv2.resize(density_map_color, (frame.shape[1], frame.shape[0]))
                 annotated_frame = cv2.addWeighted(frame, 0.6, density_map_color, 0.4, 0)
-                
+
             elif model_select == "Auto (Hybrid)":
                 # Intelligent auto-switching based on multiple factors
                 should_switch, switch_reason = should_switch_to_csrnet(
@@ -317,8 +349,8 @@ if run_app:
                 if should_switch:
                     # Switch to CSRNet for dense crowd estimation
                     c_count, density_map = csrnet_model.estimate(frame)
-                    calibration_factor = 0.18  # Fixed: was 25.0 (100x too high)
-                    count = int(abs(c_count) * calibration_factor)
+                    # Apply same calibration factor used in CSRNet Only mode
+                    count = int(c_count * csrnet_scale)
                     mode = "CSRNet (Auto)"
                     
                     # Visualize Density Map

@@ -65,21 +65,29 @@ class CSRNetEstimator:
         """
         self.device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
         print(f"Initializing CSRNet on {self.device}...")
-        
-        self.model = CSRNet()
+
+        # If a model_path is given, skip VGG weight copying (load_weights=True)
+        # so the network is initialised cleanly before loading the checkpoint.
+        use_pretrained_vgg = (model_path is None)
+        self.model = CSRNet(load_weights=not use_pretrained_vgg)
         self.model.to(self.device)
-        
+
         if model_path:
-            print(f"Loading CSRNet weights from {model_path}...")
-            checkpoint = torch.load(model_path, map_location=self.device)
-            # Handle if checkpoint is wrapped in 'state_dict' or direct
-            if 'state_dict' in checkpoint:
-                self.model.load_state_dict(checkpoint['state_dict'])
+            print(f"Loading CSRNet weights from: {model_path}")
+            # weights_only=False needed for older checkpoint formats
+            checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+            # Handle checkpoint wrapped in 'state_dict' key or bare OrderedDict
+            if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                state_dict = checkpoint['state_dict']
             else:
-                self.model.load_state_dict(checkpoint)
-        
+                state_dict = checkpoint
+            self.model.load_state_dict(state_dict)
+            print(f"✅ CSRNet weights loaded successfully ({len(state_dict)} layers).")
+        else:
+            print("⚠️  No weights file provided — using random/VGG init (counts will be inaccurate).")
+
         self.model.eval()
-        self.transform = None # Define generic transform here or in estimate
+        self.transform = None
 
     def estimate(self, frame):
         """
