@@ -2,11 +2,11 @@ import cv2
 from ultralytics import YOLO
 
 class YoloDetector:
-    def __init__(self, model_path='yolov8n.pt'):
+    def __init__(self, model_path='yolov8s.pt'):
         """
         Initialize YOLOv8 detector.
         Args:
-            model_path (str): Path to the YOLOv8 model weights. Defaults to 'yolov8n.pt'.
+            model_path (str): Path to the YOLOv8 model weights. Defaults to 'yolov8s.pt'.
         """
         print(f"Loading YOLOv8 model from {model_path}...")
         self.model = YOLO(model_path)

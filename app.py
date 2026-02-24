@@ -214,7 +214,7 @@ csrnet_scale = 0.20
 # Initialize Models (Cached)
 @st.cache_resource
 def load_models():
-    yolo = YoloDetector('yolov8n.pt') # Nano model: ~2x faster than Small, good for real-time
+    yolo = YoloDetector('yolov8s.pt') # Small model
     try:
         csrnet = CSRNetEstimator('csrnet_weights.pth')
     except:
