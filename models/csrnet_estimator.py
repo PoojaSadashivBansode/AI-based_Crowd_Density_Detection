@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torchvision import models
+from torchvision import transforms
 import numpy as np
 import cv2
 
@@ -88,40 +89,34 @@ class CSRNetEstimator:
             print("⚠️  No weights file provided — using random/VGG init (counts will be inaccurate).")
 
         self.model.eval()
-        self.transform = None
+
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
+        ])
 
     def estimate(self, frame):
-        """
-        Estimate crowd count using CSRNet.
-        Args:
-            frame (numpy.ndarray): Input image frame (BGR).
+        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        Returns:
-            float: Estimated count.
-            numpy.ndarray: Density map (normalized for visualization).
-        """
-        img = frame.copy()
-        # Preprocessing similar to standard CSRNet implementation
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = img.astype(np.float32) / 255.0
-        img = torch.from_numpy(img.transpose((2, 0, 1))).unsqueeze(0) # CHW
-        
-        # Normalize - using ImageNet mean/std as VGG was trained on it
-        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-        img = (img - mean) / std
-        
-        img = img.to(self.device)
-        
+        # Resize to nearest multiple of 8 (important for CSRNet)
+        h, w, _ = img.shape
+        h = (h // 8) * 8
+        w = (w // 8) * 8
+        img = cv2.resize(img, (w, h))
+
+        # Apply transform
+        img = self.transform(img)
+        img = img.unsqueeze(0).to(self.device)
+
         with torch.no_grad():
-            output = self.model(img)
-            
-        count = abs(torch.sum(output).item())
-        
-        # Process density map for visualization
-        density_map = output.cpu().squeeze().numpy()
-        
-        # Ensure density map is valid for display
-        density_map = np.nan_to_num(density_map) 
-        
+            density_map = self.model(img)
+
+        density_map = density_map.squeeze().cpu().numpy()
+
+        # Final count
+        count = float(np.sum(density_map))
+
         return count, density_map

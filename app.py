@@ -134,7 +134,7 @@ def calculate_crowd_coverage(boxes, frame_shape):
     coverage = total_box_area / frame_area
     return min(1.0, coverage)  # Cap at 100%
 
-def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_threshold=30):
+def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_threshold=20):
     """
     Multi-factor decision function to switch from YOLO to CSRNet.
     
@@ -147,34 +147,14 @@ def should_switch_to_csrnet(count, boxes, frame_shape, prev_counts, count_thresh
     Returns:
         bool: True if should switch to CSRNet
         str: Reason for switching
-    """
-    reasons = []
-    
-    # Factor 1: Count threshold
-    if count >= count_threshold:
-        reasons.append(f"High count ({count} ≥ {count_threshold})")
-    
-    # Factor 2: Bounding box overlap
+    """    
     overlap_ratio = calculate_box_overlap_ratio(boxes)
-    if overlap_ratio >= 0.15:  # 15% overlap threshold
-        reasons.append(f"High overlap ({overlap_ratio:.2%})")
-    
-    # Factor 3: Crowd coverage
     coverage = calculate_crowd_coverage(boxes, frame_shape)
-    if coverage >= 0.25:  # 25% frame coverage
-        reasons.append(f"High coverage ({coverage:.2%})")
-    
-    # Factor 4: Sudden drop detection (if we have history)
-    if len(prev_counts) >= 3:
-        avg_recent = np.mean(prev_counts[-3:])
-        if avg_recent > count_threshold and count < avg_recent * 0.7:
-            reasons.append(f"Sudden drop ({count} < {avg_recent:.0f})")
-    
-    # Switch if at least 2 factors are triggered
-    should_switch = len(reasons) >= 2
-    reason_str = ", ".join(reasons) if reasons else "None"
-    
-    return should_switch, reason_str
+
+    if count >= 20 or overlap_ratio > 0.10 or coverage > 0.20:
+        return True, f"count={count}, overlap={overlap_ratio:.2f}, coverage={coverage:.2f}"
+
+    return False, "Sparse crowd"
 
 # Sidebar Configuration
 st.sidebar.title("🔧 Settings")
@@ -209,12 +189,12 @@ if run_app:
 
 # CSRNet calibration: official weights trained on ShanghaiTech Part A (500+ dense crowds)
 # tend to overcount on normal scenes. Fixed scale factor tuned for this project's video.
-csrnet_scale = 0.20
+
 
 # Initialize Models (Cached)
 @st.cache_resource
 def load_models():
-    yolo = YoloDetector('yolov8s.pt') # Small model
+    yolo = YoloDetector('yolov8l.pt') # Small model
     try:
         csrnet = CSRNetEstimator('csrnet_weights.pth')
     except:
@@ -329,8 +309,7 @@ if st.session_state.get("running", False):
             if model_select == "CSRNet Only":
                 # Force CSRNet mode
                 c_count, density_map = csrnet_model.estimate(frame)
-                # Apply scene calibration factor (CSRNet trained on dense crowds, may overcount)
-                count = int(c_count * csrnet_scale)
+                count = int(c_count)
                 mode = "CSRNet (Forced)"
                 switch_reason = "Manual selection"
 
@@ -343,14 +322,13 @@ if st.session_state.get("running", False):
             elif model_select == "Auto (Hybrid)":
                 # Intelligent auto-switching based on multiple factors
                 should_switch, switch_reason = should_switch_to_csrnet(
-                    count, boxes, frame.shape, count_history, count_threshold=30
+                    count, boxes, frame.shape, count_history, count_threshold=20
                 )
                 
                 if should_switch:
                     # Switch to CSRNet for dense crowd estimation
                     c_count, density_map = csrnet_model.estimate(frame)
-                    # Apply same calibration factor used in CSRNet Only mode
-                    count = int(c_count * csrnet_scale)
+                    count = int(c_count)
                     mode = "CSRNet (Auto)"
                     
                     # Visualize Density Map
@@ -430,7 +408,7 @@ if st.session_state.get("running", False):
 
             # 4. Video Display
             # Convert color space only when displaying
-            video_placeholder.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
+            video_placeholder.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), channels="RGB", width="stretch")
 
             # 5. Graph Update
             # Append new data
